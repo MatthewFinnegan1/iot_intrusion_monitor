@@ -1,6 +1,6 @@
 from scapy.all import sniff, IP
 from datetime import datetime
-
+from detection.maliciousIPDetection import trim_csv
 def is_noise_traffic(ip):
     return (
         ip.startswith("10.") or
@@ -11,6 +11,7 @@ def is_noise_traffic(ip):
         ip == "255.255.255.255"
     )
 
+
 def handle_packet(packet):
     if IP in packet:
         src = packet[IP].src
@@ -18,9 +19,10 @@ def handle_packet(packet):
 
         if not is_noise_traffic(dst):
             timestamp = datetime.now().isoformat()
-            print(f"[{timestamp}] {src} → {dst}")
+            #print(f"[{timestamp}] {src} → {dst}")
             with open("data/traffic_log.csv", "a") as f:
                 f.write(f"{timestamp},{src},{dst}\n")
+                #trim_csv("data/traffic_log.csv", 10000)
 
 def start_sniffing():
     print("Starting basic packet sniffer... (press Ctrl+C to stop)")
