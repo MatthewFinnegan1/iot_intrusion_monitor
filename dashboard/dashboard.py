@@ -1,9 +1,11 @@
 import streamlit as st
 import pandas as pd
-import streamlit.components.v1 as components
-import time
+from streamlit_autorefresh import st_autorefresh
 
-# Load CSV data
+st_autorefresh(interval=3000, key="data_refresh")
+st.set_page_config(layout="wide", page_title="Home Network Intrusion Monitor")
+
+# Load data
 def load_traffic_log():
     try:
         df = pd.read_csv("data/traffic_log.csv", header=None, names=["timestamp", "src", "dst"])
@@ -18,88 +20,128 @@ def load_seen_ips():
     except:
         return pd.DataFrame(columns=["ip", "timestamp", "score", "verdict"]).set_index("ip")
 
-# Calculate stats
-def calculate_stats(traffic_df, seen_df):
+def get_stats_and_annotated(traffic_df, seen_df):
     verdicts = traffic_df["dst"].map(seen_df["verdict"]).fillna("Unknown")
-    return {
-        "total": len(traffic_df),
-        "safe": (verdicts == "Safe").sum(),
-        "suspicious": (verdicts == "Suspicious").sum(),
-        "malicious": (verdicts == "Malicious").sum()
-    }, verdicts
-
-# Color line formatter
-def format_line(row):
-    color = {
-        "Safe": "green",
-        "Suspicious": "orange",
-        "Malicious": "red"
-    }.get(row["verdict"], "gray")
-    return f"<span style='color:{color}'>[{row['timestamp']}] {row['src']} → {row['dst']} ({row['verdict']})</span>"
-
-# Streamlit setup
-st.set_page_config(layout="wide", page_title="Home Network Intrusion Monitor")
-st.markdown("## Home Network Intrusion Monitor")
-
-# Layout setup
-left_col, right_col = st.columns([1, 2])
-
-# Static stats
-with left_col:
-    st.markdown("### Packet Stats")
-    stats_placeholder = st.empty()
-
-# Live feed block
-with right_col:
-    st.markdown("### Live Traffic Feed")
-    feed_placeholder = st.empty()
-
-# Manual update loop
-while True:
-    traffic_df = load_traffic_log()
-    seen_df = load_seen_ips()
-    traffic_df["verdict"] = traffic_df["dst"].map(seen_df["verdict"]).fillna("Unknown")
-    traffic_df["line"] = traffic_df.apply(format_line, axis=1)
-
-    # Stats update
-    verdicts = traffic_df["verdict"]
+    traffic_df = traffic_df.copy()
+    traffic_df["verdict"] = verdicts
     stats = {
-        "Total Packets Checked": len(traffic_df),
-        "Malicious Packets": (verdicts == "Malicious").sum(),
-        "Suspicious Packets": (verdicts == "Suspicious").sum(),
-        "Safe Packets": (verdicts == "Safe").sum()
+        "Safe": (verdicts == "Safe").sum(),
+        "Suspicious": (verdicts == "Suspicious").sum(),
+        "Malicious": (verdicts == "Malicious").sum(),
+        "Total": len(traffic_df)
     }
-    with stats_placeholder.container():
-        for k, v in stats.items():
-            st.metric(k, v)
+    return stats, traffic_df
 
-    # Feed update (latest 200 lines)
+# Colors
+SAFE_COLOR = "#4caf50"
+SUSPICIOUS_COLOR = "#ff9800"
+MALICIOUS_COLOR = "#f44336"
+TEXT_COLOR = "#fff"
+CARD_BG = "#1e1e26"
+
+# CSS Styling
+st.markdown(f"""
+    <style>
+    .card {{
+        background: {CARD_BG};
+        padding: 2rem;
+        border-radius: 1.25rem;
+        box-shadow: 0 2px 20px #0004;
+    }}
+    .button {{
+        width: 100%;
+        padding: 0.75rem;
+        margin-top: 1rem;
+        font-size: 1rem;
+        font-weight: 600;
+        color: {TEXT_COLOR};
+        border: none;
+        border-radius: 0.75rem;
+        cursor: pointer;
+        transition: background 0.2s ease;
+        box-shadow: 0 1px 6px #0003;
+    }}
+    .safe {{ background: {SAFE_COLOR}; }}
+    .safe:hover {{ background: #45a145; }}
+    .suspicious {{ background: {SUSPICIOUS_COLOR}; color: #111; }}
+    .suspicious:hover {{ background: #f4a733; }}
+    .malicious {{ background: {MALICIOUS_COLOR}; }}
+    .malicious:hover {{ background: #da3b2d; }}
+    .metric-label {{
+        font-size: 1.1rem;
+        margin-bottom: 0.5rem;
+        color: #aaa;
+    }}
+    .metric-value {{
+        font-size: 2.2rem;
+        font-weight: bold;
+        color: white;
+    }}
+    </style>
+""", unsafe_allow_html=True)
+
+# Header
+st.markdown("<h1 style='text-align:center; margin-bottom:2rem;'>Home Network Intrusion Monitor</h1>", unsafe_allow_html=True)
+
+# Load & annotate
+traffic_df = load_traffic_log()
+seen_df = load_seen_ips()
+stats, traffic_df = get_stats_and_annotated(traffic_df, seen_df)
+
+# Layout
+left, right = st.columns([1, 2], gap="large")
+
+# ----- LEFT COLUMN -----
+with left:
+    
+
+    st.markdown('<div class="card-tab-style">', unsafe_allow_html=True)
+    st.markdown('<div class="tab-total">Total Packets Checked: {}</div>'.format(stats["Total"]), unsafe_allow_html=True)
+
+    # Safe
+    if st.button(f"{stats['Safe']} Safe Packets", key="safe_tab"):
+        with st.modal("Safe Packet Details"):
+            st.dataframe(traffic_df[traffic_df["verdict"] == "Safe"], use_container_width=True)
+    
+
+    # Suspicious
+    if st.button(f"{stats['Suspicious']} Suspicious Packets", key="suspicious_tab"):
+        with st.modal("Suspicious Packet Details"):
+            st.dataframe(traffic_df[traffic_df["verdict"] == "Suspicious"], use_container_width=True)
+   
+
+    # Malicious
+    if st.button(f"{stats['Malicious']} Malicious Packets", key="malicious_tab"):
+        with st.modal("Malicious Packet Details"):
+            st.dataframe(traffic_df[traffic_df["verdict"] == "Malicious"], use_container_width=True)
+    
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+# ----- RIGHT COLUMN -----
+with right:
+    st.markdown("<div style='font-size: 1.5rem; font-weight: 600; margin-bottom: 1rem;'>Live Traffic Feed</div>", unsafe_allow_html=True)
+
+    color_map = {
+        "Safe": SAFE_COLOR,
+        "Suspicious": SUSPICIOUS_COLOR,
+        "Malicious": MALICIOUS_COLOR,
+        "Unknown": "#aaa"
+    }
+
+    traffic_df["line"] = traffic_df.apply(
+        lambda row: f"<span style='color: {color_map.get(row['verdict'], '#bbb')};'>"
+                    f"[{row['timestamp']}] {row['src']} → {row['dst']} ({row['verdict']})</span>", axis=1)
+    
     log_html = "<br>".join(traffic_df["line"].tolist()[-200:])
-    feed_placeholder.markdown(
+    st.markdown(
         f"""
-        <div id='traffic-log' style='height:400px; overflow-y:auto; font-family:monospace; background:#111; padding:10px; border-radius:5px; border:1px solid #333;'>
+        <div style='height:400px;overflow-y:auto;font-family:monospace;background:#111;
+        padding:1rem;border-radius:0.8rem;border:1px solid #333;'>
         {log_html}
         </div>
-
-        <script>
-        const container = document.getElementById("traffic-log");
-        let autoScroll = sessionStorage.getItem("autoScroll") !== "false";
-
-        container.addEventListener("scroll", () => {{
-            const atBottom = Math.abs(container.scrollHeight - container.scrollTop - container.clientHeight) < 5;
-            autoScroll = atBottom;
-            sessionStorage.setItem("autoScroll", autoScroll);
-        }});
-
-        const scrollToBottom = () => {{
-            if (sessionStorage.getItem("autoScroll") !== "false") {{
-                container.scrollTop = container.scrollHeight;
-            }}
-        }};
-        requestAnimationFrame(scrollToBottom);
-        </script>
         """,
         unsafe_allow_html=True
     )
-
-    time.sleep(3)  # Refresh interval
+    st.markdown("</div>", unsafe_allow_html=True)
